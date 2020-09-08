@@ -102,6 +102,8 @@ _gui-text="Pen height: DOWN, (%):">30</param>
 <_option value="3">Full; ignore grouping</_option>
 </param>
 
+<param indent="1" name="allow_reversal" type="boolean" _gui-text="Allow Path Reversal"></param> 
+
 <param indent="1" name="resolution" type="optiongroup" appearance="minimal" _gui-text="Motor Resolution:">
 <_option value="1">~2870 DPI (Slightly Smoother)</_option>
 <_option value="2">~1435 DPI (Slightly Faster)</_option>

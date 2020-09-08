@@ -108,6 +108,11 @@ def core_options(parser, config):
                        default=config["auto_rotate"], \
                        help="Boolean: Auto select portrait vs landscape")
 
+    options.add_option("--allow_reversal",\
+                       type="inkbool", action="store", dest="allow_reversal",\
+                       default=config["allow_reversal"],\
+                       help="Allow path reversal during plot optimization")
+
     options.add_option("--reordering",\
                        type="int", action="store", dest="reordering",\
                        default=config["reordering"],\

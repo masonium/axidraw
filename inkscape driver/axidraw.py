@@ -723,6 +723,7 @@ class AxiDraw(inkex.Effect):
             asr = axidraw_svg_reorder.ReorderEffect()
             asr.getoptions([])
             asr.options.reordering = self.options.reordering
+            asr.options.allow_reversal = self.options.allow_reversal
             asr.auto_rotate = self.options.auto_rotate
             asr.document = self.document
             asr.effect() # Run the reordering

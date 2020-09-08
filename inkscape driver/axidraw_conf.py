@@ -76,6 +76,9 @@ port_config = 0         # Serial port behavior option (0-2)
 auto_rotate = True      # Auto-select portrait vs landscape orientation
                             # Default: True
 
+allow_reversal = True   # Allow path reversal during plot optimization
+                            # Default: True
+
 reordering = 0          # Plot optimization option for how groups are handled
                             # 0: Preserve order of objects given in SVG file (Default).
                             # 1: Reorder objects, preserving groups

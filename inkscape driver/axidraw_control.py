@@ -219,6 +219,7 @@ class AxiDrawWrapperClass( inkex.Effect ):
         ad.options.auto_rotate      = self.options.auto_rotate
         ad.options.resolution       = self.options.resolution
         ad.options.reordering       = self.options.reordering
+        ad.options.allow_reversal   = self.options.allow_reversal
 
         # Special case for this wrapper function:
         # If the port is None, change the port config option

@@ -86,6 +86,10 @@ class ReorderEffect(inkex.Effect):
         self.OptionParser.add_option( "--reordering",\
         action="store", type="int", dest="reordering",\
         default=1,help="How groups are handled")
+    
+        self.OptionParser.add_option( "--allow_reversal",\
+        action="store", type="inkbool", dest="allow_reversal",\
+        default=True, help="Whether reversal is allowed")
         
         self.auto_rotate = True
 
@@ -97,6 +101,7 @@ class ReorderEffect(inkex.Effect):
         self.air_total_default = 0
         self.air_total_sorted = 0
         self.printPortrait = False
+        self.removed_nodes = dict()
         
         # Rendering is available for debug purposes. It only previews
         # pen-up movements that are reordered and typically does not
@@ -391,11 +396,25 @@ class ReorderEffect(inkex.Effect):
         # Perform the re-ordering:
         ordered_element_list = self.ReorderNodeList(coord_dict, group_dict)
 
-        # Once a better order for the svg elements has been determined,
-        # All there is do to is to reintroduce the nodes to the parent in the correct order
-        for elt in ordered_element_list:
+        # Once a better order for the svg elements has been
+        # determined, All there is do to is to reintroduce the nodes
+        # to the parent in the correct order, reversing any nodes as
+        # described by the element list.
+        for elt, is_reversed in ordered_element_list:
             # Creates identical node at the correct location according to ordered_element_list
-            input_node.append(elt)
+            if is_reversed:
+                input_node.append(self.reverse_node(elt))
+
+                # When the element is reversed, the original element
+                # has to explicitly be deleted.
+                try:
+                    input_node.remove(elt)
+                    self.removed_nodes[elt.get('id')] = elt
+                except:
+                    pass
+            else:
+                input_node.append(elt)
+
         # Once program is finished parsing through 
         for element_to_remove in nodes_to_delete: 
             try:
@@ -968,24 +987,20 @@ class ReorderEffect(inkex.Effect):
                  3. We may be able to unlink clones using the code in pathmodifier.py
                 """
 
-                refid = node.get(inkex.addNS('href', 'xlink'))
-                if refid is not None:
-                    # [1:] to ignore leading '#' in reference
-                    path = '//*[@id="{0}"]'.format(refid[1:])
-                    refnode = node.xpath(path)
-                    if refnode is not None:
-                        x = float(node.get('x', '0'))
-                        y = float(node.get('y', '0'))
-                        # Note: the transform has already been applied
-                        if x != 0 or y != 0:
-                            mat_new2 = simpletransform.composeTransform(matNew, simpletransform.parseTransform('translate({0:f},{1:f})'.format(x, y)))
-                        else:
-                            mat_new2 = matNew
-                        if len(refnode) > 0:
-                            plottable, the_point = self.group_last_pt(refnode[0], mat_new2)
-                        else:
-                            plottable, the_point = self.group_last_pt(refnode, mat_new2)
-                        return plottable, the_point 
+                refnode, _ = self._use_target(node)
+                if refnode is not None:
+                    x = float(node.get('x', '0'))
+                    y = float(node.get('y', '0'))
+                    # Note: the transform has already been applied
+                    if x != 0 or y != 0:
+                        mat_new2 = simpletransform.composeTransform(matNew, simpletransform.parseTransform('translate({0:f},{1:f})'.format(x, y)))
+                    else:
+                        mat_new2 = matNew
+                    if len(refnode) > 0:
+                        plottable, the_point = self.group_last_pt(refnode[0], mat_new2)
+                    else:
+                        plottable, the_point = self.group_last_pt(refnode, mat_new2)
+                    return plottable, the_point 
         except:
             pass    
     
@@ -993,6 +1008,19 @@ class ReorderEffect(inkex.Effect):
         # Return False and a default point
         return False, point 
 
+    def _use_target(self, node):
+        """
+            Input: A '<use>' Node.
+            Output: The node references by the <use> node and id of the node.
+            Returns None in either case if the node and/or id does not exist, respectively..
+        """
+        refid = node.get(inkex.addNS('href', 'xlink'))
+        if refid is not None:
+            # [1:] to ignore leading '#' in reference
+            path = '//*[@id="{0}"]'.format(refid[1:])
+            return (node.xpath(path), refid[1:])
+        else:
+            return (None, None)
 
     def group_first_pt(self, group, matCurrent = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]):
         """
@@ -1134,6 +1162,7 @@ class ReorderEffect(inkex.Effect):
         while group_dict:
             
             nearest_dist = float('inf')
+            nearest_reversed = False
             for key,node in group_dict.items():    
                 # Is this node non-plottable?
                 # If so, exit loop and append element to ordered_layer_element_list
@@ -1150,23 +1179,39 @@ class ReorderEffect(inkex.Effect):
                 exit_x = coord_dict[key][3] # x-coordinate of last point of the path
                 exit_y = coord_dict[key][4] # y-coordinate of last point of the path
 
-                object_dist = (entry_x-self.x_last)*(entry_x-self.x_last) + (entry_y-self.y_last) * (entry_y-self.y_last)
+                entry_object_dist = (entry_x-self.x_last)*(entry_x-self.x_last) + (entry_y-self.y_last) * (entry_y-self.y_last)
                 # This is actually the distance squared; calculating it rather than the pythagorean distance
                 #  saves a square root calculation. Right now, we only care about _which distance is less_
                 #  not the exact value of it, so this is a harmless shortcut.
                 # If this distance is smaller than the previous element's distance, then replace the previous
                 # element's entry with our current element's distance 
-                if nearest_dist >= object_dist:
+                if nearest_dist >= entry_object_dist:
                     # We have found an element closer than the previous closest element 
                     nearest = node
-                    nearest_id = key 
-                    nearest_dist = object_dist
+                    nearest_id = key
+                    nearest_dist = entry_object_dist
                     nearest_start_x = entry_x
                     nearest_start_y = entry_y
+                    nearest_end_x = exit_x
+                    nearest_end_y = exit_y
+                    nearest_reversed = False
+
+                #if True:
+                if self.options.allow_reversal:
+                    exit_object_dist = (exit_x-self.x_last)*(exit_x-self.x_last) + (exit_y-self.y_last) * (exit_y-self.y_last)
+                    if nearest_dist >= exit_object_dist:
+                        nearest = node
+                        nearest_id = key
+                        nearest_dist = exit_object_dist
+                        nearest_start_x = exit_x
+                        nearest_start_y = exit_y
+                        nearest_end_x = entry_x
+                        nearest_end_y = entry_y
+                        nearest_reversed = True
 
             # Now that the closest object has been determined, it is time to add it to the 
             # optimized list of closest objects
-            ordered_layer_element_list.append(nearest)
+            ordered_layer_element_list.append((nearest, nearest_reversed))
     
             # To determine the closest object in the next iteration of the loop, 
             # we must save the last x,y coor of this element
@@ -1190,8 +1235,8 @@ class ReorderEffect(inkex.Effect):
                     etree.SubElement( self.preview_layer,
                         inkex.addNS( 'path', 'svg '), path_attrs, nsmap=inkex.NSS )
 
-                self.x_last = coord_dict[nearest_id][3]
-                self.y_last = coord_dict[nearest_id][4]
+                self.x_last = nearest_end_x
+                self.y_last = nearest_end_y
 
             # Remove this element from group_dict to indicate it has been optimized
             del group_dict[nearest_id]
@@ -1200,7 +1245,96 @@ class ReorderEffect(inkex.Effect):
         # Return the optimized list of svg elements in the layer
         return ordered_layer_element_list
 
-    
+
+    def reverse_node(self, node):
+        """Given a plottable node, return a potentially new node with
+equivalent geometry but reversed start and end points.
+
+        'reversed_symbols' is mapping from symbols / uses to reversed
+        versions of those symbols. This dictionary is maintained so
+        that the svg does not blow up in size by duplicating many times.
+
+        All of the nodes in reversed_symbols should be added to final svg.
+        """
+        def is_type(tag_type, tag=node.tag):
+            return tag == inkex.addNS(tag_type, "svg") or tag == tag_type
+
+        orig_transform = node.get("transform")
+        attrs = dict(node.attrib)
+        if "id" in attrs:
+            del attrs["id"]
+
+        # circles, ellipses, rects, and polygons are reversible
+        if is_type("circle") or is_type("ellipse") or is_type("rect") or is_type("polygon"):
+            return node
+
+        # for lines, we can swap (x1, y1) and (x2, y2)
+        elif is_type("line"):
+            x1 = node.get("x1", 0)
+            y1 = node.get("y1", 0)
+            x2 = node.get("x2", 0)
+            y2 = node.get("y2", 0)
+            attrs.update({"x1": x2, "y1": y2, "x2": x1, "y2": y1})
+            return etree.Element(inkex.addNS("line", "svg"),
+                                 attrs,
+                                 nsmap=inkex.NSS)
+
+        elif is_type("g") or is_type("symbol"):
+            # we only copy symbols when they are referenced by use
+            # statements, not actually used as symbols. So we should
+            # replace them with groups upon returning.
+            tag_name = "g"
+
+            gos = etree.Element(inkex.addNS(tag_name, 'svg'), attrs, nsmap=inkex.NSS) # group or symbol
+            
+            # reverse every subnode, and reverse the ordering
+            for subnode in reversed(node):
+                gos.append(self.reverse_node(subnode))
+
+            return gos
+
+        elif is_type("polyline"):
+            pl = node.get("points", "").strip()
+            if pl == "":
+                return node
+
+            points = pl.replace(",", " ").split()
+            pairs = [(points[i], points[i+1]) for i in range(0,len(points), 2)]
+            rev_pairs = reversed(pairs)
+            points_string = " ".join(a[0] + " " + a[1] for a in rev_pairs)
+
+            attrs.update({"points": points_string})
+            return etree.Element(inkex.addNS('polyline', 'svg'), attrs, nsmap=inkex.NSS)
+
+        elif is_type("path"):
+            reverse_d = plot_utils.pathdata_reverse(node.get("d"))
+            attrs.update({"d": reverse_d})
+            return etree.Element(inkex.addNS('path', 'svg'), attrs, nsmap=inkex.NSS)
+
+        elif is_type("use"):
+            refnode, refid = self._use_target(node)
+            if refnode:
+                if len(refnode) > 0:
+                    refnode = refnode[0]
+            else:
+                refnode = self.removed_nodes[refid]
+
+            rev = self.reverse_node(refnode)
+            mat_new = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+            x = float(attrs.get("x", "0"))
+            y = float(attrs.get("y", "0"))
+            if attrs.get("transform"):
+                mat_new = simpletransform.composeTransform(mat_new, simpletransform.parseTransform(attrs["transform"]))
+            if x != 0 or y != 0:
+                mat_new = simpletransform.composeTransform(mat_new, simpletransform.parseTransform("translate( {0:f} {1:f} )".format(x, y)))
+
+            trans_group = etree.Element(inkex.addNS("g", "svg"), {"transform": simpletransform.formatTransform(mat_new)}, nsmap=inkex.NSS)
+            trans_group.append(rev)
+
+            return trans_group
+
+        raise NotImplementedError(str(node.tag))
+
     def color_index(self, index):
         index = index % 9
         
